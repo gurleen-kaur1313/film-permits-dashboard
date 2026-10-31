@@ -26,12 +26,6 @@ updates. Chips in the header show active filters; Reset clears everything.
 3. **Open it.** `python3 -m http.server 8000`, then visit http://localhost:8000
    (a browser blocks loading data from a `file://` page; if you do open the file directly, use the file picker it shows).
 
-## Host it (GitHub Pages)
-1. Create a public GitHub repo and upload everything in this folder, **including** `data/permits_clean.csv`
-   (about 10 MB, well under GitHub's limit).
-2. Repo Settings > Pages > Deploy from branch `main` / root.
-3. After a minute the site is at `https://<username>.github.io/<repo>/`. Open it in a private window to confirm it loads.
-
 ## Cleaning rules (shown in the dashboard footer)
 Only `Shooting Permit` events (use `--all-types` to keep all); rows missing start, end, borough or category dropped;
 durations <= 0 or > 336 h dropped; empty subcategory = "Unspecified"; streets = number of "between" segments in the
