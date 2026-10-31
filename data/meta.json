@@ -1,0 +1,35 @@
+{
+  "source": "Film_Permits_20261031.csv",
+  "raw_rows": 20005,
+  "dropped": {
+    "not a shooting permit": 4365,
+    "missing start/end/borough/category": 550,
+    "duration <= 0 or > 336 h": 13
+  },
+  "event_types_kept": [
+    "Shooting Permit"
+  ],
+  "kept_rows": 15077,
+  "date_min": "2023-01-01T04:00",
+  "date_max": "2026-07-31T18:00",
+  "boroughs": {
+    "Manhattan": 6687,
+    "Brooklyn": 5304,
+    "Queens": 2457,
+    "Bronx": 485,
+    "Staten Island": 144
+  },
+  "top_categories": {
+    "Television": 7557,
+    "Film": 2665,
+    "Commercial": 2215,
+    "Still Photography": 1285,
+    "Web": 982,
+    "Documentary": 164,
+    "Student": 92,
+    "Music Video": 73
+  },
+  "n_subcategories": 26,
+  "share_with_streets": 1.0,
+  "generated": "2026-10-31T13:30:33"
+}
