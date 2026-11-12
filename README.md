@@ -47,4 +47,4 @@ tuning and the two usability tests happen after the peer session.
 
 ## Credits
 D3.js v7 (Mike Bostock, ISC license) · NYC Open Data, Mayor's Office of Media and Entertainment ·
-AI assistance: Claude Sonnet 5.5 (Anthropic) wrote the first version of this code; edit this line to describe what you changed.
+AI assistance: Claude Sonnet 5.5 (Anthropic) was used to get help in the first version of the code.

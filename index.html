@@ -210,7 +210,9 @@ function indexData(rows){
   const bIdx = new Map(boroughs.map((b,i)=>[b,i]));
   // ----- subcategories shown in the scatter
   const sCount = d3.rollup(rows, v=>v.length, r=>r.sub);
-  const subs = [...sCount].filter(d=>d[1]>=MIN_SUB_N).sort((a,b)=>b[1]-a[1]).slice(0,MAX_SUBS).map(d=>d[0]);
+  const PLACEHOLDER = /^(not applicable|n\/a|na|none|unspecified|other)$/i;
+  const subs = [...sCount].filter(d=>d[1]>=MIN_SUB_N && !PLACEHOLDER.test(d[0]))
+  .sort((a,b)=>b[1]-a[1]).slice(0,MAX_SUBS).map(d=>d[0]);
   const sIdx = new Map(subs.map((s,i)=>[s,i]));
   // ----- time
   const starts = rows.map(r=>new Date(r.start));
