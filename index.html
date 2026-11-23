@@ -4,23 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NYC Film Permits: Lights, Camera, Street Closures</title>
+<meta name="description" content="Interactive D3 dashboard of NYC Film Permits: which productions take over city streets, where, and for how long.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='4' width='14' height='10' rx='2' fill='%2308306B'/%3E%3Cpath d='M1 4 4 1h3L4 4m3 0 3-3h3l-3 3' fill='%2308306B'/%3E%3C/svg%3E">
 <!--
-  Mini-Project 2 working prototype: NYC Film Permits (NYC Open Data, tg4x-b46p)
+  Mini-Project 2 final: NYC Film Permits (NYC Open Data, tg4x-b46p)
   Information Visualization, NYU Tandon
 
-  Sources and credits (edit this block so it is accurate for your submission):
+  Sources and credits:
     - D3.js v7 (Mike Bostock, ISC license), bundled as d3.min.js
     - Data: NYC Open Data, "Film Permits", Mayor's Office of Media and Entertainment
-    - AI assistance: Claude Sonnet 5.5 (Anthropic) wrote the first version of this code
+    - AI assistance: Claude (Anthropic) helped write and revise this code
 
   Structure of this file:
-    1. CSS             layout (Gestalt: enclosure bands, proximity, shared legend strip)
+    1. CSS             layout (Gestalt: enclosure bands, proximity, one shared legend strip)
     2. CONFIG          palette + constants (palette checked for greyscale / colour-blind safety)
     3. Data loading    fetch data/permits_clean.csv (or file picker fallback)
     4. Indexing        turn rows into typed arrays so cross-filtering stays fast
-    5. State           one shared filter state: boroughs, categories, subcategories, date range
+    5. State           one shared filter state, mirrored in the URL hash (shareable views)
     6. compute()       ONE pass over all rows builds the data for all three views
-    7. Renderers       scatter, borough bars, timeline (+ brush), legend, chips
+    7. Layout          every SVG is drawn at its real pixel width and rebuilt on resize
+    8. Renderers       scatter, borough bars, timeline (+ brush), legend, chips, takeaway
 -->
 <style>
 :root{
@@ -29,7 +32,8 @@
 }
 *{box-sizing:border-box}
 body{margin:0;background:#fff;color:var(--ink);font:14px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
-.wrap{max-width:1200px;margin:0 auto;padding:16px}
+a{color:var(--acc)}
+.wrap{max-width:1240px;margin:0 auto;padding:16px}
 /* header: top of the visual hierarchy */
 .card{background:var(--card);border:1.2px solid var(--ink);border-radius:4px}
 header.card{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:10px 16px}
@@ -38,12 +42,14 @@ header .sub{margin:2px 0 0;color:var(--mut);font-size:13px}
 header .title{flex:1 1 360px}
 #chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:2 1 280px;justify-content:flex-end;min-height:28px}
 .chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--mut);border-radius:12px;padding:1px 4px 1px 10px;font-size:12px;background:#fff}
+.chip .k{color:var(--mut)}
 .chip button{border:0;background:none;cursor:pointer;font-size:13px;color:var(--mut);padding:0 4px}
 .chip button:hover{color:var(--ink)}
 .nofilter{color:var(--mut);font-size:12px}
 #reset{border:1.2px solid var(--ink);background:#fff;border-radius:16px;padding:5px 16px;font-weight:700;cursor:pointer;font-size:13px}
 #reset:hover{background:var(--strip)}
-#summary{width:100%;font-size:12px;color:var(--mut);margin:0}
+#summary{width:100%;font-size:12.5px;color:var(--mut);margin:0}
+#summary b{color:var(--ink)}
 /* shared legend strip: one legend for the whole dashboard (<= 7 items each) */
 .legend{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;background:var(--strip);padding:8px 16px;margin-top:var(--gap);font-size:12.5px}
 .legend .lt{font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--mut)}
@@ -52,33 +58,56 @@ header .title{flex:1 1 360px}
 .legend button:hover{background:#e6e9f1}
 .legend button[aria-pressed="true"]{outline:1.5px solid var(--ink)}
 .legend button.dim{opacity:.4}
-.dot{width:11px;height:11px;border-radius:50%;border:1px solid var(--ink);display:inline-block}
-.sw{width:13px;height:11px;border:1px solid #777;display:inline-block}
+.dot{width:11px;height:11px;border-radius:50%;border:1px solid var(--ink);display:inline-block;flex:none}
+.sw{width:13px;height:11px;border:1px solid #777;display:inline-block;flex:none}
 .kitem{display:inline-flex;align-items:center;gap:6px}
-/* enclosure bands group related views */
+/* enclosure bands group related views; gap between bands (26px) > gap inside a band (12px) = proximity */
 .band{border:1.4px dashed var(--line);border-radius:8px;padding:8px 12px 12px;margin-top:var(--band-gap)}
-.band + .band{margin-top:var(--band-gap)}
 .band > .bt{font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--mut);margin:0 0 6px 4px}
 .row{display:grid;grid-template-columns:1.6fr 1fr;gap:var(--gap)}
-.view{padding:0;overflow:hidden;position:relative}
-.view svg{display:block;width:100%;height:auto}
+.row > *{min-width:0}
+.view{padding:0;overflow:hidden;position:relative;display:flex;flex-direction:column}
+.view .takeaway{margin-top:auto}
+.vh{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:4px 12px;padding:10px 14px 0}
+.vh h2{margin:0;font-size:14px;line-height:1.3}
+.vh p{margin:1px 0 0;font-size:11.5px;color:var(--mut)}
+.tools{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--mut);white-space:nowrap}
+.view > svg{display:block;width:100%;height:auto}
+.tools svg{display:inline-block;overflow:visible}
 svg text{font-family:inherit;fill:var(--ink)}
 svg .mut{fill:var(--mut)}
-svg .vt{font-weight:700;font-size:12.5px}
 .axis path,.axis line{stroke:var(--line)}
 .axis text{font-size:11px;fill:var(--mut)}
-.grid line{stroke:#e3e6ec}.grid path{display:none}
-.dotc{stroke:var(--ink);stroke-width:.8;cursor:pointer}
-.bar rect.seg{stroke:#777;stroke-width:.5;cursor:pointer}
+.grid line{stroke:#e8eaef}.grid path{display:none}
+.guide{stroke:#6b7385;stroke-width:1;stroke-dasharray:4 3}
+.quad{font-size:10.5px;font-style:italic;fill:#7b8396;letter-spacing:.02em}
+.dotc{cursor:pointer}
+.dotc:focus{outline:none}
+.dotc:focus-visible{stroke:var(--acc)!important;stroke-width:3!important}
+.leader{stroke:#7b8396;stroke-width:.9}
+g.bar{cursor:pointer;outline:none}
+g.bar:focus-visible .hit{stroke:var(--acc);stroke-width:1.5;stroke-dasharray:3 2}
+.bar rect.seg{stroke:#fff;stroke-width:1}
 .sel-outline{fill:none;stroke:var(--acc);stroke-width:2.2;pointer-events:none}
-#tip{position:fixed;pointer-events:none;background:#fff;border:1px solid var(--ink);border-radius:4px;padding:6px 9px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:10;display:none;max-width:260px}
+/* segmented Counts / Share toggle */
+.segbtn{display:inline-flex;border:1px solid var(--ink);border-radius:14px;overflow:hidden}
+.segbtn button{border:0;background:#fff;font:inherit;font-size:11.5px;padding:3px 10px;cursor:pointer;color:var(--ink)}
+.segbtn button+button{border-left:1px solid var(--ink)}
+.segbtn button[aria-pressed="true"]{background:var(--ink);color:#fff;font-weight:700}
+.takeaway{margin:0;padding:8px 14px 10px;font-size:12.5px;border-top:1px solid #e3e6ec;background:#fbfcfe}
+.takeaway b{font-weight:700}
+#tip{position:fixed;pointer-events:none;background:#fff;border:1px solid var(--ink);border-radius:4px;padding:6px 9px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:10;display:none;max-width:280px}
 #tip b{display:block;margin-bottom:2px}
 #tip .m{color:var(--mut)}
+#tip .hint{display:block;margin-top:3px;color:var(--mut);font-size:11px}
 .foot{margin:14px 4px 0;font-size:11.5px;color:var(--mut)}
+.foot p{margin:0 0 4px}
 #loadmsg{display:none;margin-top:16px;padding:18px 20px;border:1.5px dashed var(--line);border-radius:8px;background:var(--strip)}
 #loadmsg code{background:#e6e9f1;padding:1px 5px;border-radius:3px}
 .warn{color:#9a4a00}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media(max-width:900px){.row{grid-template-columns:1fr}#chips{justify-content:flex-start}}
+@media(max-width:520px){.wrap{padding:10px}header h1{font-size:20px}.band{padding:8px 6px 8px}}
 </style>
 </head>
 <body>
@@ -86,11 +115,11 @@ svg .vt{font-weight:700;font-size:12.5px}
   <header class="card">
     <div class="title">
       <h1>Lights, Camera, Street Closures</h1>
-      <p class="sub">Which productions take over NYC streets, and for how long?</p>
+      <p class="sub">Which NYC productions take over city streets, where, and for how long?</p>
     </div>
-    <div id="chips"></div>
-    <button id="reset" type="button">Reset &#10005;</button>
-    <p id="summary"></p>
+    <div id="chips" aria-live="polite"></div>
+    <button id="reset" type="button" title="Clear every filter (Esc)">Reset &#10005;</button>
+    <p id="summary" aria-live="polite"></p>
   </header>
 
   <div class="legend" id="legend">
@@ -99,24 +128,45 @@ svg .vt{font-weight:700;font-size:12.5px}
     <span class="lt">SHOOT DURATION</span><span id="durLegend" style="display:contents"></span>
   </div>
 
-  <section class="band">
-    <p class="bt">WHAT &amp; WHERE</p>
+  <section class="band" aria-label="What and where">
+    <p class="bt">1 · WHAT &amp; WHERE</p>
     <div class="row">
-      <div class="card view"><svg id="scatter" viewBox="0 0 660 410" role="img" aria-label="Scatter of subcategories: permits versus median shoot duration"></svg></div>
-      <div class="card view"><svg id="bars" viewBox="0 0 420 410" role="img" aria-label="Permits by borough, split by shoot duration"></svg></div>
+      <div class="card view" id="scatterCard">
+        <div class="vh">
+          <div><h2>Subcategories: how many permits, and how long they shoot</h2>
+          <p>Click dots to filter (click again to remove). Dashed lines = medians.</p></div>
+          <div class="tools" id="sizekey" aria-label="Dot size key"></div>
+        </div>
+        <svg id="scatter" role="group" aria-label="Scatter of production subcategories: permits issued versus median shoot duration; dot area shows average streets held"></svg>
+        <p class="takeaway" id="takeaway"></p>
+      </div>
+      <div class="card view" id="barsCard">
+        <div class="vh">
+          <div><h2>Permits by borough</h2>
+          <p>Click a bar to filter. Shades = shoot duration.</p></div>
+          <div class="tools"><span class="segbtn" role="group" aria-label="Bar scale">
+            <button type="button" data-mode="count" aria-pressed="true">Counts</button><button type="button" data-mode="share" aria-pressed="false">Share %</button>
+          </span></div>
+        </div>
+        <svg id="bars" role="group" aria-label="Permits by borough, split by shoot duration"></svg>
+        <p class="takeaway" id="barsTakeaway"></p>
+      </div>
     </div>
   </section>
 
-  <section class="band">
-    <p class="bt">WHEN</p>
-    <div class="card view"><svg id="timeline" viewBox="0 0 1100 270" role="img" aria-label="Permits per month by category, drag to select dates"></svg></div>
+  <section class="band" aria-label="When">
+    <p class="bt">2 · WHEN</p>
+    <div class="card view" id="timelineCard">
+      <div class="vh"><div><h2>Permits per month by category</h2>
+        <p>Drag across the chart to filter every view to those months. Click empty space to clear.</p></div></div>
+      <svg id="timeline" role="group" aria-label="Permits per month by category; drag to select a date range"></svg>
+    </div>
   </section>
 
-  <p class="foot" id="foot"></p>
-
+  <div class="foot" id="foot"></div>
   <div id="loadmsg"></div>
 </div>
-<div id="tip"></div>
+<div id="tip" role="tooltip"></div>
 
 <script src="d3.min.js"></script>
 <script>
@@ -125,18 +175,38 @@ svg .vt{font-weight:700;font-size:12.5px}
 /* ============================================================
    2. CONFIG
    ============================================================ */
-// Category palette: dark -> light, chosen so every category has a different
-// greyscale lightness (L*) and stays distinguishable under protan/deutan/tritan simulation.
-const CAT_PALETTE = { Television:"#08306B", Film:"#7B3294", Commercial:"#BB5566", Student:"#44AA99", Other:"#88CCEE" };
-const FALLBACK = ["#08306B","#7B3294","#BB5566","#44AA99"];   // used if a top-4 category isn't one of the named ones
-const OTHER = "Other", OTHER_COLOR = "#88CCEE";
-// Ordinal duration bins -> neutral grey ramp (ordered lightness, no hue)
-const DUR_LABELS = ["<4 h","4–12 h","12–24 h",">24 h"];
-const DUR_RAMP   = ["#e5e5e5","#ababab","#6f6f6f","#303030"];
+// Category palette, dark -> light. Every pair differs in hue AND in lightness:
+//   L* = 20.9 / 38.6 / 57.0 / 71.6 / 89.7  (greyscale steps >= 14.6 L*)
+// Smallest pairwise CIE76 difference under simulated colour-vision deficiency
+// (Machado 2009, full severity): protan 34.9, deutan 36.5, tritan 38.6.
+const CAT_PALETTE = { "Television":"#08306B", "Film":"#A82F1C", "Commercial":"#1E9A80", "Still Photography":"#E8A21E" };
+const FALLBACK = ["#08306B","#A82F1C","#1E9A80","#E8A21E"];   // used if a top-4 category isn't one of the named ones
+const OTHER = "Other", OTHER_COLOR = "#C9E6F7";
+// Ordinal duration bins -> neutral grey ramp (ordered lightness, no hue).
+// Bins split the data roughly 11 / 22 / 36 / 31 %, so every shade is visible.
+const DUR_LABELS = ["<12 h","12–14 h","14–16 h","≥16 h"];
+const DUR_EDGES  = [12, 14, 16];
+const DUR_RAMP   = ["#e3e3e3","#adadad","#717171","#333333"];
 const MAX_HOURS = 336, HBIN = 0.1, NB = Math.round(MAX_HOURS / HBIN);   // duration histogram for fast medians
 const MIN_SUB_N = 30, MAX_SUBS = 60;       // scatter shows subcategories with >= 30 permits (max 60)
-const fmt = d3.format(","), fmt1 = d3.format(".1f");
-const monthFmt = d3.timeFormat("%b %Y");
+const PLACEHOLDER = /^(not applicable|n\/a|na|none|unspecified|other)$/i;   // not a real subcategory
+const LINKS = { live:"https://gurleen-kaur1313.github.io/film-permits-dashboard/",
+                repo:"https://github.com/gurleen-kaur1313/film-permits-dashboard" };
+const fmt = d3.format(","), fmt1 = d3.format(".1f"), pct = d3.format(".0%");
+const monthFmt = d3.timeFormat("%b %Y"), isoMonth = d3.timeFormat("%Y-%m"), parseMonth = d3.timeParse("%Y-%m");
+// many permits end a minute before the hour (e.g. 14.98 h), so values within 0.1 h of a whole hour show as that hour
+const hrs = h => (Math.abs(h-Math.round(h))<=0.1001 ? Math.round(h) : fmt1(h)) + " h";
+
+// light colours (pale blue) need a dark edge to be seen on white; text in pale/amber hues is darkened
+const isLight = c => d3.lab(c).l > 80;
+const textColor = c => d3.lab(c).l > 60 ? d3.color(c).darker(1.6).formatHex() : c;
+
+// text width, used for collision-free label placement
+const _ctx = document.createElement("canvas").getContext("2d");
+function textW(s, size, weight){
+  _ctx.font = `${weight||400} ${size}px ${getComputedStyle(document.body).fontFamily}`;
+  return _ctx.measureText(s).width;
+}
 
 /* ============================================================
    3. DATA LOADING
@@ -176,30 +246,29 @@ function showLoadHelp(err){
    4. INDEXING: rows -> typed arrays
    ============================================================ */
 let D;            // indexed dataset
-let BASE;         // unfiltered aggregates (fixes the axis domains so views don't rescale when filtering)
-const state = { boroughs:new Set(), cats:new Set(), subs:new Set(), range:null, dragging:false };
+let BASE;         // unfiltered aggregates (fix axis domains so views don't jump when filtering)
+const state = { boroughs:new Set(), cats:new Set(), subs:new Set(), range:null, barMode:"count", dragging:false };
 
 function start(rows){
   D = indexData(rows);
   if(!D.n){ showLoadHelp(new Error("file has no usable rows")); return; }
   document.getElementById("app").style.visibility = "visible";
+  BASE = compute();                        // state is still empty here = unfiltered
+  readHash();                              // restore a shared view, if the URL has one
   buildLegend();
-  initScatter(); initBars(); initTimeline();
-  BASE = compute();                        // empty state = unfiltered
-  setDomains(BASE);
   wireGlobal();
-  render(true);
-  window.__ready = true;                   // used by the automated test
+  layout();
+  window.__ready = true;                   // used by the automated screenshot/test script
 }
+
+function durBin(h){ return h < DUR_EDGES[0] ? 0 : h < DUR_EDGES[1] ? 1 : h < DUR_EDGES[2] ? 2 : 3; }
 
 function indexData(rows){
   const n = rows.length;
   // ----- category ranking: top 4 by count + "Other"
   const catCount = d3.rollup(rows, v=>v.length, r=>r.category);
-  // a real category literally called "Other" is folded into the Other bin
   const top4 = [...catCount].filter(d=>d[0]!==OTHER).sort((a,b)=>b[1]-a[1]).slice(0,4).map(d=>d[0]);
   const catNames = [...top4, OTHER];
-  // named categories keep their assigned colour; any others take the unused palette colours
   const named = top4.map(name=>CAT_PALETTE[name] || null);
   const free = FALLBACK.filter(f=>!named.includes(f));
   const catColors = [...named.map(c=> c || free.shift()), OTHER_COLOR];
@@ -208,18 +277,19 @@ function indexData(rows){
   const bCount = d3.rollup(rows, v=>v.length, r=>r.borough);
   const boroughs = [...bCount].sort((a,b)=>b[1]-a[1]).map(d=>d[0]);
   const bIdx = new Map(boroughs.map((b,i)=>[b,i]));
-  // ----- subcategories shown in the scatter
+  // ----- subcategories shown in the scatter (placeholders like "Not Applicable" are not real subcategories)
   const sCount = d3.rollup(rows, v=>v.length, r=>r.sub);
-  const PLACEHOLDER = /^(not applicable|n\/a|na|none|unspecified|other)$/i;
   const subs = [...sCount].filter(d=>d[1]>=MIN_SUB_N && !PLACEHOLDER.test(d[0]))
-  .sort((a,b)=>b[1]-a[1]).slice(0,MAX_SUBS).map(d=>d[0]);
+    .sort((a,b)=>b[1]-a[1]).slice(0,MAX_SUBS).map(d=>d[0]);
   const sIdx = new Map(subs.map((s,i)=>[s,i]));
-  // ----- time
+  const placeholderN = d3.sum([...sCount].filter(d=>PLACEHOLDER.test(d[0])), d=>d[1]);
+  const smallN = d3.sum([...sCount].filter(d=>d[1]<MIN_SUB_N && !PLACEHOLDER.test(d[0])), d=>d[1]);
+  // ----- time: one bucket per calendar month
   const starts = rows.map(r=>new Date(r.start));
   const tMin = d3.min(starts), tMax = d3.max(starts);
   const m0 = d3.timeMonth.floor(tMin);
   const nM = (tMax.getFullYear()-m0.getFullYear())*12 + (tMax.getMonth()-m0.getMonth()) + 1;
-  // ----- typed columns (-1 = not in scatter list)
+  // ----- typed columns (s = -1: not drawn in the scatter)
   const t = new Float64Array(n), c = new Uint8Array(n), b = new Uint8Array(n), s = new Int16Array(n),
         m = new Uint16Array(n), bin = new Uint8Array(n), hb = new Uint16Array(n), st = new Uint8Array(n);
   for(let i=0;i<n;i++){
@@ -229,8 +299,8 @@ function indexData(rows){
     b[i] = bIdx.get(r.borough);
     s[i] = sIdx.has(r.sub) ? sIdx.get(r.sub) : -1;
     m[i] = (d.getFullYear()-m0.getFullYear())*12 + (d.getMonth()-m0.getMonth());
-    bin[i] = dur<4 ? 0 : dur<12 ? 1 : dur<24 ? 2 : 3;
-    hb[i] = Math.min(NB-1, Math.floor(dur/HBIN));
+    bin[i] = durBin(dur);
+    hb[i] = Math.min(NB-1, Math.floor(dur/HBIN + 1e-6));   // epsilon: 15/0.1 = 149.999... in floating point
     st[i] = Math.min(255, +r.streets || 0);
   }
   // modal category per subcategory: fixed hue so dots don't change colour while filtering
@@ -238,74 +308,140 @@ function indexData(rows){
   for(let i=0;i<n;i++) if(s[i]>=0) subCatCount[s[i]][c[i]]++;
   const subCat = subCatCount.map(a=>a.indexOf(Math.max(...a)));
   const anyStreets = st.some(v=>v>0);
-  return { n, t, c, b, s, m, bin, hb, st, catNames, catColors, boroughs, subs, subCat, m0, nM, tMin, tMax, anyStreets,
-           subTotals: subs.map(x=>sCount.get(x)) };
+  return { n, t, c, b, s, m, bin, hb, st, catNames, catColors, boroughs, subs, subCat, m0, nM, tMin, tMax,
+           anyStreets, placeholderN, smallN };
+}
+const monthStart = i => d3.timeMonth.offset(D.m0, i);
+const monthMid   = i => new Date((+monthStart(i) + +monthStart(i+1))/2);
+
+/* ============================================================
+   5. STATE <-> URL hash (so a filtered view can be shared or bookmarked)
+   ============================================================ */
+function writeHash(){
+  const p = new URLSearchParams();
+  if(state.boroughs.size) p.set("b",[...state.boroughs].join("|"));
+  if(state.cats.size) p.set("c",[...state.cats].join("|"));
+  if(state.subs.size) p.set("s",[...state.subs].join("|"));
+  if(state.range) p.set("r", isoMonth(state.range[0])+"_"+isoMonth(d3.timeMonth.offset(state.range[1],-1)));
+  if(state.barMode!=="count") p.set("bars",state.barMode);
+  const h = p.toString();
+  try{ history.replaceState(null,"", h ? "#"+h : location.pathname+location.search); }catch(e){}
+}
+function readHash(){
+  const p = new URLSearchParams(location.hash.slice(1));
+  const add = (key, set, valid)=>(p.get(key)||"").split("|").filter(v=>valid.includes(v)).forEach(v=>set.add(v));
+  add("b", state.boroughs, D.boroughs); add("c", state.cats, D.catNames); add("s", state.subs, D.subs);
+  const r = (p.get("r")||"").split("_").map(parseMonth);
+  if(r.length===2 && r[0] && r[1] && r[0]<=r[1]) state.range = [r[0], d3.timeMonth.offset(r[1],1)];
+  if(p.get("bars")==="share") state.barMode = "share";
 }
 
 /* ============================================================
    6. compute(): one pass over all rows builds data for the three views.
       Each view ignores the filter on ITS OWN dimension, so you still see
       the options you could switch to (standard cross-filtering):
-        scatter  <- borough + category + dates   (shows every subcategory; selected ones highlighted)
-        bars     <- category + dates + subcategory   (shows every borough; selected ones highlighted)
-        timeline <- borough + subcategory            (shows the whole time axis so the brush stays usable)
+        scatter  <- borough + category + dates      (every subcategory shown; selected ones highlighted)
+        bars     <- category + dates + subcategory  (every borough shown; selected ones highlighted)
+        timeline <- borough + subcategory           (whole time axis shown so the brush stays usable;
+                                                     categories are highlighted, not removed)
    ============================================================ */
 function compute(){
   const {n,t,c,b,s,m,bin,hb,st,subs,boroughs,nM} = D, ns = subs.length, nb = boroughs.length;
-  const subN = new Uint32Array(ns), subSt = new Float64Array(ns), hist = new Uint32Array(ns*NB);
+  const subN = new Uint32Array(ns), subSt = new Float64Array(ns), hist = new Uint32Array(ns*NB), histAll = new Uint32Array(NB);
   const barN = new Uint32Array(nb*4), tl = new Uint32Array(5*nM);
   const bM = new Uint8Array(nb), cM = new Uint8Array(5), sM = new Uint8Array(ns);
   state.boroughs.forEach(name=>bM[boroughs.indexOf(name)] = 1);
   state.cats.forEach(name=>cM[D.catNames.indexOf(name)] = 1);
   state.subs.forEach(name=>{ const k = subs.indexOf(name); if(k>=0) sM[k] = 1; });
   const bAny = state.boroughs.size>0, cAny = state.cats.size>0, sAny = state.subs.size>0, rAny = !!state.range;
-  const r0 = rAny ? state.range[0].getTime() : 0, r1 = rAny ? state.range[1].getTime() : 0;
+  const r0 = rAny ? state.range[0].getTime() : 0, r1 = rAny ? state.range[1].getTime() : 0;   // [r0, r1)
   let total = 0;
   for(let i=0;i<n;i++){
     const okB = !bAny || bM[b[i]] === 1;
     const okC = !cAny || cM[c[i]] === 1;
     const okS = !sAny || (s[i]>=0 && sM[s[i]] === 1);
-    const okD = !rAny || (t[i]>=r0 && t[i]<=r1);
-    if(okB && okC && okD && s[i]>=0){ const k = s[i]; subN[k]++; subSt[k]+=st[i]; hist[k*NB+hb[i]]++; }
+    const okD = !rAny || (t[i]>=r0 && t[i]<r1);
+    if(okB && okC && okD && s[i]>=0){ const k = s[i]; subN[k]++; subSt[k]+=st[i]; hist[k*NB+hb[i]]++; histAll[hb[i]]++; }
     if(okC && okD && okS){ barN[b[i]*4+bin[i]]++; }
     if(okB && okS){ tl[c[i]*nM+m[i]]++; }
     if(okB && okC && okD && okS) total++;
   }
-  // scatter points: median from the duration histogram (0.1 h resolution)
+  // median from a histogram (0.1 h resolution) instead of sorting: keeps the brush smooth
+  const histMedian = (H, off, cnt)=>{ let acc = 0, idx = 0; for(; idx<NB; idx++){ acc += H[off+idx]; if(acc>=cnt/2) break; } return idx*HBIN; };
   const pts = [];
   for(let k=0;k<ns;k++){
     const cnt = subN[k]; if(!cnt) continue;
-    let acc = 0, idx = 0; const half = cnt/2;
-    for(; idx<NB; idx++){ acc += hist[k*NB+idx]; if(acc>=half) break; }
-    pts.push({ k, name:subs[k], n:cnt, med:(idx+0.5)*HBIN, streets:subSt[k]/cnt, cat:D.subCat[k] });
+    pts.push({ k, name:subs[k], n:cnt, med:histMedian(hist, k*NB, cnt), streets:subSt[k]/cnt, cat:D.subCat[k] });
   }
+  const allN = d3.sum(pts, d=>d.n);
+  const medAll = allN ? histMedian(histAll, 0, allN) : null;
   const bars = boroughs.map((name,i)=>{
     const segs = [0,1,2,3].map(j=>barN[i*4+j]);
     return { name, segs, total:d3.sum(segs) };
   });
-  return { pts, bars, tl, total };
+  return { pts, bars, tl, total, medAll };
 }
 
 /* ============================================================
-   7. RENDERERS
+   7. LAYOUT: each SVG is drawn at its real on-screen width (text stays a
+      readable size on any screen) and rebuilt when the window is resized.
+   ============================================================ */
+const SC = { W:660, H:420, m:{l:54,r:16,t:14,b:44} };
+const BR = { W:420, H:420, m:{l:98,r:58,t:8,b:30} };
+const TL = { W:1100, H:270, m:{l:46,r:118,t:12,b:28} };
+
+function measure(){
+  const sc = document.getElementById("scatterCard"), bc = document.getElementById("barsCard"), tc = document.getElementById("timelineCard");
+  SC.W = Math.max(300, Math.floor(sc.clientWidth));
+  SC.H = Math.round(Math.min(440, Math.max(320, SC.W*0.62)));
+  SC.m.l = SC.W < 480 ? 46 : 54;
+  BR.W = Math.max(280, Math.floor(bc.clientWidth));
+  const sideBySide = Math.abs(bc.offsetTop - sc.offsetTop) < 4;
+  BR.H = sideBySide ? SC.H : 300;
+  TL.W = Math.max(300, Math.floor(tc.clientWidth));
+  TL.H = TL.W < 600 ? 240 : 270;
+  TL.m.r = TL.W < 600 ? 96 : 128;
+}
+function layout(){
+  measure();
+  [["#scatter",SC],["#bars",BR],["#timeline",TL]].forEach(([id,L])=>
+    d3.select(id).attr("viewBox",`0 0 ${L.W} ${L.H}`).attr("width",L.W).attr("height",L.H).selectAll("*").remove());
+  initScatter(); initBars(); initTimeline();
+  setDomains(BASE);
+  draw(0);
+}
+let lastW = 0, resizeT = null;
+function onResize(){
+  clearTimeout(resizeT);
+  resizeT = setTimeout(()=>{ if(window.innerWidth !== lastW){ lastW = window.innerWidth; hideTip(); layout(); } }, 150);
+}
+
+/* ============================================================
+   8. RENDERERS
    ============================================================ */
 const tip = d3.select("#tip");
 function showTip(ev, html){
   tip.html(html).style("display","block");
   const w = tip.node().offsetWidth, h = tip.node().offsetHeight;
-  let x = ev.clientX+14, y = ev.clientY+14;
-  if(x+w > innerWidth-8) x = ev.clientX-w-14;
-  if(y+h > innerHeight-8) y = ev.clientY-h-14;
-  tip.style("left",x+"px").style("top",y+"px");
+  // keyboard focus has no mouse position: anchor the tooltip to the element instead
+  let cx = ev.clientX, cy = ev.clientY;
+  if(cx===undefined){ const r = ev.target.getBoundingClientRect(); cx = r.right; cy = r.top; }
+  let x = cx+14, y = cy+14;
+  if(x+w > innerWidth-8) x = cx-w-14;
+  if(y+h > innerHeight-8) y = cy-h-14;
+  tip.style("left",Math.max(4,x)+"px").style("top",Math.max(4,y)+"px");
 }
 const hideTip = ()=>tip.style("display","none");
 const toggle = (set, v)=>{ set.has(v) ? set.delete(v) : set.add(v); render(); };
+const onKey = fn => function(ev,d){ if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); fn(ev,d); } };
 
-// ---------- legend (shared strip): category buttons double as a filter
+// ---------- legend (shared strip): category buttons double as a filter; hover previews the category everywhere
 function buildLegend(){
   const cl = d3.select("#catLegend").selectAll("button").data(D.catNames).join("button")
     .attr("type","button").attr("title","Click to filter by category")
-    .on("click",(e,d)=>toggle(state.cats,d));
+    .on("click",(e,d)=>toggle(state.cats,d))
+    .on("mouseenter focus",(e,d)=>previewCat(d))
+    .on("mouseleave blur",()=>previewCat(null));
   cl.html((d,i)=>`<span class="dot" style="background:${D.catColors[i]}"></span>${d}`);
   d3.select("#durLegend").selectAll("span.kitem").data(DUR_LABELS).join("span").attr("class","kitem")
     .html((d,i)=>`<span class="sw" style="background:${DUR_RAMP[i]}"></span>${d}`);
@@ -315,250 +451,421 @@ function renderLegend(){
     .attr("aria-pressed",d=>state.cats.has(d))
     .classed("dim",d=>state.cats.size>0 && !state.cats.has(d));
 }
+// linked highlight on hover (no filtering): fade everything not in the hovered category
+function previewCat(name){
+  if(name===null){ draw(120); return; }
+  const ci = D.catNames.indexOf(name);
+  d3.select("#scatter").selectAll("circle.dotc").transition().duration(120).attr("opacity",d=>d.cat===ci?0.95:0.12);
+  d3.select("#timeline").selectAll(".lines g").transition().duration(120).attr("opacity",d=>d.i===ci?1:0.12);
+}
 
 // ---------- chips + summary
 function renderChips(){
   const items = [];
-  state.boroughs.forEach(v=>items.push({label:v, rm:()=>state.boroughs.delete(v)}));
-  state.cats.forEach(v=>items.push({label:v, rm:()=>state.cats.delete(v)}));
-  state.subs.forEach(v=>items.push({label:v, rm:()=>state.subs.delete(v)}));
-  if(state.range) items.push({label:monthFmt(state.range[0])+" – "+monthFmt(state.range[1]), rm:()=>{state.range=null;}});
+  state.boroughs.forEach(v=>items.push({k:"Borough", label:v, rm:()=>state.boroughs.delete(v)}));
+  state.cats.forEach(v=>items.push({k:"Category", label:v, rm:()=>state.cats.delete(v)}));
+  state.subs.forEach(v=>items.push({k:"Subcategory", label:v, rm:()=>state.subs.delete(v)}));
+  if(state.range) items.push({k:"Dates", label:rangeLabel(state.range), rm:()=>{state.range=null;}});
   const sel = d3.select("#chips");
   sel.selectAll(".nofilter").remove();
-  const chips = sel.selectAll(".chip").data(items, d=>d.label).join(
-    en=>{ const c = en.append("span").attr("class","chip"); c.append("span").text(d=>d.label);
-          c.append("button").attr("type","button").attr("aria-label","Remove filter").html("&#10005;"); return c; });
+  const chips = sel.selectAll(".chip").data(items, d=>d.k+d.label).join(
+    en=>{ const c = en.append("span").attr("class","chip");
+          c.append("span").attr("class","k").text(d=>d.k+":");
+          c.append("span").text(d=>d.label);
+          c.append("button").attr("type","button").attr("aria-label",d=>"Remove filter "+d.label).html("&#10005;"); return c; });
   chips.select("button").on("click",(e,d)=>{ d.rm(); render(); });
-  if(!items.length) sel.append("span").attr("class","nofilter").text("No filters: click a bar, dot or legend item, or drag on the timeline");
+  if(!items.length) sel.append("span").attr("class","nofilter").text("No filters: click a dot, bar or legend item, or drag on the timeline");
+}
+function rangeLabel(r){
+  const a = monthFmt(r[0]), b = monthFmt(d3.timeMonth.offset(r[1],-1));
+  return a===b ? a : a+" – "+b;
 }
 function renderSummary(res){
-  document.getElementById("summary").textContent =
-    `Showing ${fmt(res.total)} of ${fmt(D.n)} permits`;
+  const share = D.n ? res.total/D.n : 0;
+  document.getElementById("summary").innerHTML = res.total
+    ? `Showing <b>${fmt(res.total)}</b> of ${fmt(D.n)} shooting permits (${pct(share)}).`
+    : `<span class="warn">No permits match these filters. Remove a chip or press Reset.</span>`;
 }
 
 // ---------- 1. scatter: x = permits (log), y = median duration, area = avg streets held, hue = category
-const SC = { W:660, H:410, m:{l:58,r:18,t:46,b:46} };
-let sx, sy, sr, sG, sDots, sLab;
+let sx, sy, sr, sG, Y0;
 function initScatter(){
   const svg = d3.select("#scatter");
-  svg.append("text").attr("class","vt").attr("x",14).attr("y",20).text("Subcategories: how many permits, and how long they shoot");
-  svg.append("text").attr("class","mut").attr("x",14).attr("y",36).style("font-size","11px").text("Click a dot to filter. Area = average streets held.");
   sG = svg.append("g");
   sG.append("g").attr("class","grid");
   sG.append("g").attr("class","axis ax-x").attr("transform",`translate(0,${SC.H-SC.m.b})`);
   sG.append("g").attr("class","axis ax-y").attr("transform",`translate(${SC.m.l},0)`);
+  sG.append("g").attr("class","quads");
+  sG.append("g").attr("class","guides");
   svg.append("text").attr("class","mut").style("font-size","11px").attr("x",(SC.m.l+SC.W-SC.m.r)/2).attr("y",SC.H-8).attr("text-anchor","middle").text("Permits issued (log scale) →");
-  svg.append("text").attr("class","mut").style("font-size","11px").attr("transform",`translate(14,${(SC.m.t+SC.H-SC.m.b)/2}) rotate(-90)`).attr("text-anchor","middle").text("Median shoot duration (hours) →");
+  sG.append("text").attr("class","mut ylab").style("font-size","11px").attr("transform",`translate(13,${(SC.m.t+SC.H-SC.m.b)/2}) rotate(-90)`).attr("text-anchor","middle");
   sG.append("g").attr("class","dots"); sG.append("g").attr("class","labels").style("pointer-events","none");
-  sG.append("g").attr("class","sizekey");
 }
 function setDomains(B){
-  const maxN = d3.max(B.pts,d=>d.n);
-  // fixed axes (so dots visibly move when you filter). The log axis starts below 1 permit so
-  // a heavily filtered subcategory never falls off the left edge; clamp() is a safety net.
-  sx = d3.scaleLog().domain([0.8, maxN*1.5]).range([SC.m.l+6,SC.W-SC.m.r]).clamp(true);
-  sy = d3.scaleLinear().domain([0, d3.max(B.pts,d=>d.med)*1.3]).nice().range([SC.H-SC.m.b,SC.m.t]).clamp(true);
-  const maxS = d3.max(B.pts,d=>d.streets) || 1;
-  // radius proportional to sqrt(value) so AREA is proportional to value (min radius keeps tiny dots visible)
-  sr = v => Math.max(3, 17*Math.sqrt(v/maxS));
+  const maxN = d3.max(B.pts,d=>d.n) || 1;
+  // x: log scale handles the skew (30 to ~5,000 permits). Starts below 1 so a heavily filtered
+  // subcategory never falls off the left edge; clamp() is only a safety net.
+  sx = d3.scaleLog().domain([0.8, maxN*1.6]).range([SC.m.l+8,SC.W-SC.m.r-8]).clamp(true);
+  // y: fitted to the unfiltered medians with padding (dots encode position, not length,
+  // so the axis does not need to start at 0). Widened later only if a filter pushes a dot outside.
+  const lo = d3.min(B.pts,d=>d.med), hi = d3.max(B.pts,d=>d.med), pad = Math.max(0.75,(hi-lo)*0.15);
+  Y0 = [Math.floor(lo-pad), Math.ceil(hi+pad)];
+  sy = d3.scaleLinear().domain(Y0).range([SC.H-SC.m.b-6,SC.m.t+6]);
+  // radius proportional to sqrt(value) so dot AREA is proportional to streets held
+  const maxS = d3.max(B.pts,d=>d.streets) || 1, RMAX = Math.max(12, Math.min(18, SC.W/38));
+  sr = v => Math.max(5, RMAX*Math.sqrt(v/maxS));
   sr.max = maxS;
-  // axes + grid (domains are fixed so the chart doesn't rescale while filtering)
-  const ticks = [1,3,10,30,100,300,1000,3000,10000,30000,100000,300000].filter(v=>v>=sx.domain()[0] && v<=sx.domain()[1]);
+  const ticks = [1,3,10,30,100,300,1000,3000,10000,30000,100000].filter(v=>v>=sx.domain()[0] && v<=sx.domain()[1]);
   sG.select(".ax-x").call(d3.axisBottom(sx).tickValues(ticks).tickFormat(fmt).tickSizeOuter(0));
-  sG.select(".ax-y").call(d3.axisLeft(sy).ticks(6).tickSizeOuter(0));
-  sG.select(".grid").attr("transform",`translate(${SC.m.l},0)`)
-    .call(d3.axisLeft(sy).ticks(6).tickSize(-(SC.W-SC.m.l-SC.m.r)).tickFormat(""));
-  // timeline y domain is also fixed from the unfiltered data
-  ty.domain([0,(d3.max(B.tl)||1)*1.08]).nice();
-  tG.select(".ax-y").call(d3.axisLeft(ty).ticks(5).tickSizeOuter(0));
-  tG.select(".grid").call(d3.axisLeft(ty).ticks(5).tickSize(-(TL.W-TL.m.l-TL.m.r)).tickFormat(""));
-  // size key (two reference circles, laid out left to right so labels never collide)
-  const key = sG.select(".sizekey").attr("transform",`translate(${SC.W-230},${SC.m.t+2})`);
-  key.selectAll("*").remove();
+  drawYAxis(0);
+  // size key (two reference circles) in the view header
+  const key = d3.select("#sizekey").html("");
   if(D.anyStreets){
-    const lo = Math.max(1, Math.round(sr.max*0.25)), hi = Math.max(lo+1, Math.round(sr.max));
-    const label = v=>v+(v===1?" street":" streets");
-    let x = sr(lo);
-    key.append("circle").attr("cx",x).attr("cy",16).attr("r",sr(lo)).attr("fill","#cfd3dc").attr("stroke","#1c2230").attr("stroke-width",.8);
-    x += sr(lo)+5;
-    key.append("text").attr("class","mut").style("font-size","10.5px").attr("x",x).attr("y",20).text(label(lo));
-    x += label(lo).length*5.6 + 12 + sr(hi);
-    key.append("circle").attr("cx",x).attr("cy",16).attr("r",sr(hi)).attr("fill","#cfd3dc").attr("stroke","#1c2230").attr("stroke-width",.8);
-    key.append("text").attr("class","mut").style("font-size","10.5px").attr("x",x+sr(hi)+5).attr("y",20).text(label(hi));
+    const lo2 = Math.max(1, Math.round(sr.max*0.25)), hi2 = Math.max(lo2+1, Math.round(sr.max));
+    const R = sr(hi2);
+    key.append("span").text("Area = avg. streets held:");
+    [lo2, hi2].forEach(v=>{
+      key.append("svg").attr("width",2*sr(v)+2).attr("height",2*R+2).attr("aria-hidden","true")
+        .append("circle").attr("cx",sr(v)+1).attr("cy",R+1).attr("r",sr(v)).attr("fill","#dfe2e8").attr("stroke","#1c2230").attr("stroke-width",.8);
+      key.append("span").text(v);
+    });
   }
 }
-function renderScatter(res, dur){
-  const pts = res.pts.slice().sort((a,b)=>b.streets-a.streets);   // big dots first, small on top
-  const sel = state.subs;
-  sDots = sG.select(".dots").selectAll("circle").data(pts, d=>d.name);
-  sDots.exit().transition().duration(dur).attr("r",0).remove();
-  const en = sDots.enter().append("circle").attr("class","dotc").attr("cx",d=>sx(d.n)).attr("cy",d=>sy(d.med)).attr("r",0)
-    .on("click",(e,d)=>toggle(state.subs,d.name))
-    .on("mousemove",(e,d)=>showTip(e,`<b>${d.name}</b><span class="m">${D.catNames[d.cat]}</span><br>${fmt(d.n)} permits<br>Median ${fmt1(d.med)} h<br>${D.anyStreets? fmt1(d.streets)+" streets held (avg)":""}`))
-    .on("mouseleave",hideTip);
-  sDots = en.merge(sDots);
-  sDots.transition().duration(dur)
-    .attr("cx",d=>sx(d.n)).attr("cy",d=>sy(d.med)).attr("r",d=>D.anyStreets? sr(d.streets) : 7)
-    .attr("fill",d=>D.catColors[d.cat])
-    .attr("opacity",d=> sel.size && !sel.has(d.name) ? 0.22 : 0.92)
-    .style("stroke-width",d=> sel.has(d.name) ? 2.4 : 0.8);
-  sDots.order();
-  // direct labels: selected dots + the 5 biggest by permit count, skipping overlaps
-  const want = new Map();
-  pts.slice().sort((a,b)=>b.n-a.n).slice(0,5).forEach(d=>want.set(d.name,d));
-  pts.forEach(d=>{ if(sel.has(d.name)) want.set(d.name,d); });
-  const placed = [], labels = [];
-  [...want.values()].sort((a,b)=>b.n-a.n).forEach(d=>{
-    const w = d.name.length*6.1, x = sx(d.n), y = Math.max(SC.m.t+16, sy(d.med) - (D.anyStreets? sr(d.streets):7) - 5);
-    const box = [x-w/2, y-11, x+w/2, y+3];
-    if(placed.some(p=>box[0]<p[2]&&box[2]>p[0]&&box[1]<p[3]&&box[3]>p[1])) return;
-    placed.push(box); labels.push({name:d.name,x:Math.min(Math.max(x,SC.m.l+w/2),SC.W-SC.m.r-w/2),y});
-  });
-  sG.select(".labels").selectAll("text").data(labels,d=>d.name).join(
-      en=>en.append("text").attr("x",d=>d.x).attr("y",d=>d.y).style("font-size","11px").style("font-weight",700)
-            .attr("text-anchor","middle").attr("paint-order","stroke").style("stroke","#fff").style("stroke-width",3).text(d=>d.name))
-    .transition().duration(dur).attr("x",d=>d.x).attr("y",d=>d.y);
+function drawYAxis(dur){
+  const span = sy.domain();
+  sG.select(".ax-y").transition().duration(dur).call(d3.axisLeft(sy).ticks(6).tickSizeOuter(0));
+  sG.select(".grid").attr("transform",`translate(${SC.m.l},0)`).transition().duration(dur)
+    .call(d3.axisLeft(sy).ticks(6).tickSize(-(SC.W-SC.m.l-SC.m.r)).tickFormat(""));
+  sG.select(".ylab").text(`Median shoot duration (h; axis starts at ${span[0]} h) →`);
 }
 
-// ---------- 2. borough bars: length = permits, segment lightness = duration bin
-const BR = { W:420, H:410, m:{l:100,r:60,t:46,b:22} };
+// pick the extreme subcategories (the ones the takeaway talks about). Tiny groups (< 10 permits
+// after filtering) are skipped so one odd permit can't become "the longest".
+function extremes(pts){
+  const pool = pts.filter(d=>d.n>=10).length ? pts.filter(d=>d.n>=10) : pts;
+  if(!pool.length) return null;
+  const most = pool.reduce((a,d)=>d.n>a.n?d:a);
+  const short = pool.slice().sort((a,b)=>a.med-b.med || b.n-a.n)[0];
+  const long = pool.slice().sort((a,b)=>b.med-a.med || b.n-a.n)[0];
+  const streets = pool.reduce((a,d)=>d.streets>a.streets?d:a);
+  const ties = d => pool.filter(p=>p!==d && Math.abs(p.med-d.med)<0.05).length;
+  return { most, short, long, streets, shortTies:ties(short), longTies:ties(long) };
+}
+
+function renderScatter(res, dur){
+  const pts = res.pts.slice().sort((a,b)=>b.streets-a.streets);   // big dots first, small on top
+  const sel = state.subs, X = sx, P = {x0:SC.m.l, x1:SC.W-SC.m.r, y0:SC.m.t, y1:SC.H-SC.m.b};
+  // --- y domain: keep the fitted domain, widen only if needed
+  const lo = d3.min(pts,d=>d.med), hi = d3.max(pts,d=>d.med);
+  const want = [Math.min(Y0[0], lo!==undefined ? Math.floor(lo-0.5) : Y0[0]), Math.max(Y0[1], hi!==undefined ? Math.ceil(hi+0.5) : Y0[1])];
+  if(want[0]!==sy.domain()[0] || want[1]!==sy.domain()[1]){ sy.domain(want); drawYAxis(dur); }
+  const R = d => D.anyStreets ? sr(d.streets) : 7;
+
+  // --- median guide lines + quadrant captions (makes "frequent vs rare, short vs long" readable)
+  const gx = pts.length ? d3.median(pts,d=>d.n) : null, gy = res.medAll;
+  const guides = [];
+  if(gx) guides.push({id:"v", x1:X(gx), x2:X(gx), y1:P.y0, y2:P.y1, tx:X(gx)+4, ty:P.y1-6, anchor:"start", text:`median subcategory: ${fmt(Math.round(gx))} permits`});
+  if(gy!==null) guides.push({id:"h", x1:P.x0, x2:P.x1, y1:sy(gy), y2:sy(gy), tx:P.x0+8, ty:sy(gy)-5, anchor:"start", text:`median shoot: ${hrs(gy)}`});
+  const gg = sG.select(".guides").selectAll("g").data(guides,d=>d.id).join(en=>{ const g = en.append("g"); g.append("line").attr("class","guide"); g.append("text").attr("class","mut").style("font-size","10px"); return g; });
+  gg.select("line").transition().duration(dur).attr("x1",d=>d.x1).attr("x2",d=>d.x2).attr("y1",d=>d.y1).attr("y2",d=>d.y2);
+  gg.select("text").attr("text-anchor",d=>d.anchor).text(d=>d.text).transition().duration(dur).attr("x",d=>d.tx).attr("y",d=>d.ty);
+  const quads = [
+    {t:"rare & long",      x:P.x0+8, y:P.y0+12, a:"start"}, {t:"frequent & long",  x:P.x1-6, y:P.y0+12, a:"end"},
+    {t:"rare & short",     x:P.x0+8, y:P.y1-22, a:"start"}, {t:"frequent & short", x:P.x1-6, y:P.y1-22, a:"end"} ];
+  sG.select(".quads").selectAll("text").data(quads).join("text").attr("class","quad")
+    .attr("x",d=>d.x).attr("y",d=>d.y).attr("text-anchor",d=>d.a).text(d=>d.t);
+
+  // --- dots
+  const dots = sG.select(".dots").selectAll("circle").data(pts, d=>d.name);
+  dots.exit().transition().duration(dur).attr("r",0).remove();
+  const en = dots.enter().append("circle").attr("class","dotc").attr("cx",d=>X(d.n)).attr("cy",d=>sy(d.med)).attr("r",0)
+    .attr("tabindex",0).attr("role","button")
+    .on("click",(e,d)=>toggle(state.subs,d.name))
+    .on("keydown",onKey((e,d)=>toggle(state.subs,d.name)))
+    .on("mousemove focus",(e,d)=>showTip(e,`<b>${d.name}</b><span class="m">${D.catNames[d.cat]} (most common category)</span><br>`+
+        `${fmt(d.n)} permits<br>Median shoot: ${hrs(d.med)}`+(D.anyStreets?`<br>${fmt1(d.streets)} streets held (avg. per permit)`:"")+
+        `<span class="hint">${state.subs.has(d.name)?"Click to remove filter":"Click to filter every view"}</span>`))
+    .on("mouseleave blur",hideTip);
+  const all = en.merge(dots);
+  all.attr("aria-label",d=>`${d.name}: ${fmt(d.n)} permits, median ${hrs(d.med)}`).attr("aria-pressed",d=>sel.has(d.name))
+    .transition().duration(dur)
+    .attr("cx",d=>X(d.n)).attr("cy",d=>sy(d.med)).attr("r",R)
+    .attr("fill",d=>D.catColors[d.cat])
+    // thin white outline separates overlapping dots; the pale "Other" hue gets a dark edge instead
+    .attr("stroke",d=> sel.has(d.name) ? "#000" : isLight(D.catColors[d.cat]) ? "#5b6475" : "#fff")
+    .attr("stroke-width",d=> sel.has(d.name) ? 2.6 : 1.3)
+    .attr("opacity",d=> sel.size && !sel.has(d.name) ? 0.25 : 0.95);
+  all.order();
+
+  // --- direct labels: extremes first (with what makes them extreme), then selected dots, then the biggest
+  const ex = extremes(pts), lab = new Map();
+  const addLab = (d, tag, pri)=>{ if(!d) return; const o = lab.get(d.name) || {d, tags:[], pri}; if(tag) o.tags.push(tag); o.pri = Math.min(o.pri,pri); lab.set(d.name,o); };
+  if(ex){
+    addLab(ex.most, "most permits", 0);
+    addLab(ex.short, (ex.shortTies?"joint ":"")+"shortest, "+hrs(ex.short.med), 0);
+    addLab(ex.long, (ex.longTies?"joint ":"")+"longest, "+hrs(ex.long.med), 0);
+    if(D.anyStreets) addLab(ex.streets, "most streets", 0);
+  }
+  pts.forEach(d=>{ if(sel.has(d.name)) addLab(d, null, 1); });
+  pts.slice().sort((a,b)=>b.n-a.n).slice(0,6).forEach(d=>addLab(d, null, 2));
+  renderLabels([...lab.values()].sort((a,b)=>a.pri-b.pri || b.d.n-a.d.n), pts, guides, quads, P, R, dur);
+}
+
+// Greedy label placement: try positions around the dot (close ones first); a position is rejected if
+// it leaves the plot or overlaps another label, caption or guide text, and penalised if it covers dots.
+// Labels pushed away from their dot get a thin leader line.
+function renderLabels(list, pts, guides, quads, P, R, dur){
+  const boxes = [], hit = (a,b)=>a[0]<b[2]&&a[2]>b[0]&&a[1]<b[3]&&a[3]>b[1];
+  quads.forEach(q=>{ const w = textW(q.t,10.5); boxes.push(q.a==="end"?[q.x-w,q.y-10,q.x,q.y+2]:[q.x,q.y-10,q.x+w,q.y+2]); });
+  guides.forEach(g=>{ const w = textW(g.text,10); boxes.push(g.anchor==="end"?[g.tx-w,g.ty-10,g.tx,g.ty+2]:[g.tx,g.ty-10,g.tx+w,g.ty+2]); });
+  const dotBox = pts.map(d=>{ const x = sx(d.n), y = sy(d.med), r = R(d); return [x-r,y-r,x+r,y+r]; });
+  const out = [];
+  list.slice(0,8).forEach(({d,tags})=>{
+    const tag = tags.join(" · "), w = textW(d.name,11,700) + (tag ? 5+textW(tag,10) : 0), h = 13;
+    const cx = sx(d.n), cy = sy(d.med), r = R(d);
+    const cand = [[0,-r-4],[0,r+h+1],[r+4+w/2,4],[-(r+4+w/2),4],
+                  [r+w/2,-r-10],[-(r+w/2),-r-10],[r+w/2,r+h+6],[-(r+w/2),r+h+6],
+                  [0,-r-22],[0,r+h+16],[0,-r-38],[0,r+h+32],[r+w/2+10,-r-28],[-(r+w/2+10),-r-28]];
+    let best = null;
+    cand.forEach(([dx,dy],idx)=>{
+      let x = cx+dx; const y = cy+dy;
+      x = Math.min(Math.max(x, P.x0+w/2+2), P.x1-w/2-2);          // keep inside the plot horizontally
+      const box = [x-w/2-2, y-h+2, x+w/2+2, y+3];
+      if(box[1] < P.y0-4 || box[3] > P.y1-2) return;
+      if(boxes.some(b=>hit(box,b))) return;
+      const cover = dotBox.filter(b=>hit(box,b)).length;
+      const score = cover*10 + idx;
+      if(!best || score < best.score) best = {x, y, box, score, idx};
+    });
+    if(!best) return;                                              // no room: tooltip still has it
+    boxes.push(best.box);
+    // leader line from the dot edge towards the label when the label is not touching the dot
+    const bx = Math.min(Math.max(cx,best.box[0]),best.box[2]), by = Math.min(Math.max(cy,best.box[1]),best.box[3]);
+    const dist = Math.hypot(bx-cx, by-cy), far = dist > r + 7;
+    const ux = (bx-cx)/(dist||1), uy = (by-cy)/(dist||1);
+    out.push({ name:d.name, tag, x:best.x, y:best.y, leader: far ? [cx+ux*(r+1), cy+uy*(r+1), bx-ux*2, by-uy*2] : null });
+  });
+  const g = sG.select(".labels").selectAll("g.lab").data(out,d=>d.name).join(en=>{
+      const g = en.append("g").attr("class","lab").style("opacity",0);
+      g.append("line").attr("class","leader");
+      const t = g.append("text").attr("text-anchor","middle").attr("paint-order","stroke").style("stroke","#fff").style("stroke-width",3).style("stroke-linejoin","round");
+      t.append("tspan").attr("class","n").style("font-size","11px").style("font-weight",700);
+      t.append("tspan").attr("class","t mut").style("font-size","10px").attr("dx",5);
+      return g; });
+  g.transition().duration(dur).style("opacity",1);
+  g.select("text").transition().duration(dur).attr("x",d=>d.x).attr("y",d=>d.y);
+  g.select("tspan.n").text(d=>d.name);
+  g.select("tspan.t").text(d=>d.tag);
+  g.select("line").style("display",d=>d.leader?null:"none").filter(d=>d.leader).transition().duration(dur)
+    .attr("x1",d=>d.leader[0]).attr("y1",d=>d.leader[1]).attr("x2",d=>d.leader[2]).attr("y2",d=>d.leader[3]);
+}
+
+// one-line takeaway under the scatter, written from the data currently shown
+function renderTakeaway(res){
+  const ex = extremes(res.pts), el = document.getElementById("takeaway");
+  if(!ex){ el.innerHTML = "No subcategory has permits under the current filters."; return; }
+  const cat = d => D.catNames[d.cat];
+  const tie = k => k ? `, tied with ${k} other${k>1?"s":""}` : "";
+  const same = cat(ex.most)===cat(ex.short) && cat(ex.short)===cat(ex.long);
+  let html;
+  if(same){
+    html = `<b>Takeaway:</b> ${cat(ex.most)} spans the whole range: it has the busiest subcategory (${ex.most.name}, ${fmt(ex.most.n)} permits), `+
+           `the shortest median shoot (${ex.short.name}, ${hrs(ex.short.med)}${tie(ex.shortTies)}) and the longest (${ex.long.name}, ${hrs(ex.long.med)}${tie(ex.longTies)}).`;
+  }else{
+    html = `<b>Takeaway:</b> busiest is ${ex.most.name} (${cat(ex.most)}, ${fmt(ex.most.n)} permits); shortest median shoot is ${ex.short.name} `+
+           `(${cat(ex.short)}, ${hrs(ex.short.med)}${tie(ex.shortTies)}); longest is ${ex.long.name} (${cat(ex.long)}, ${hrs(ex.long.med)}${tie(ex.longTies)}).`;
+  }
+  if(D.anyStreets) html += ` ${ex.streets.name} holds the most streets per permit (${fmt1(ex.streets.streets)}).`;
+  if(res.pts.some(d=>d.n<10)) html += ` <span style="color:var(--mut)">(Subcategories with fewer than 10 permits under these filters are left out of this comparison.)</span>`;
+  el.innerHTML = html;
+}
+
+// takeaway under the bars: which borough has the most short / long shoots (boroughs with >= 50 permits)
+function renderBarsTakeaway(res){
+  const el = document.getElementById("barsTakeaway");
+  const pool = res.bars.filter(d=>d.total>=50);
+  if(pool.length<2){ el.innerHTML = "Too few permits per borough under these filters to compare shoot lengths."; return; }
+  const sh = d=>d.segs[0]/d.total, lg = d=>d.segs[3]/d.total;
+  const s = pool.reduce((a,d)=>sh(d)>sh(a)?d:a), l = pool.reduce((a,d)=>lg(d)>lg(a)?d:a);
+  const rest = (f,x)=>{ const o = pool.filter(d=>d!==x).map(f); return pct(d3.min(o))+(pct(d3.min(o))!==pct(d3.max(o))?"–"+pct(d3.max(o)):""); };
+  el.innerHTML = `<b>Takeaway:</b> ${s.name} has the most short shoots (${pct(sh(s))} under 12 h vs ${rest(sh,s)} elsewhere); `+
+                 `${l.name} has the largest share of long ones (${pct(lg(l))} at 16 h or more). Switch to <b>Share %</b> to compare.`;
+}
+
+// ---------- 2. borough bars: length = permits (or share), segment lightness = duration bin
 let bx, by, bG;
 function initBars(){
   const svg = d3.select("#bars");
-  svg.append("text").attr("class","vt").attr("x",14).attr("y",20).text("Permits by borough");
-  svg.append("text").attr("class","mut").attr("x",14).attr("y",36).style("font-size","11px").text("Click a bar to filter. Shades show shoot duration.");
   bG = svg.append("g");
+  svg.append("g").attr("class","axis bx").attr("transform",`translate(0,${BR.H-BR.m.b})`);
 }
 function renderBars(res, dur){
-  const names = D.boroughs;
+  const share = state.barMode==="share", names = D.boroughs, plotW = BR.W-BR.m.l-BR.m.r;
   by = d3.scaleBand().domain(names).range([BR.m.t,BR.H-BR.m.b]).paddingInner(.35).paddingOuter(.2);
-  const maxTotal = d3.max(res.bars,d=>d.total) || 1;   // rescale to what is currently shown
-  bx = d3.scaleLinear().domain([0,maxTotal]).range([0,BR.W-BR.m.l-BR.m.r]);
+  const maxTotal = d3.max(res.bars,d=>d.total) || 1;           // counts rescale to what is currently shown
+  bx = d3.scaleLinear().domain([0, share ? 1 : maxTotal]).range([0,plotW]);
+  d3.select("#bars").select(".bx").transition().duration(dur)
+    .call(d3.axisBottom(bx).ticks(share ? 4 : Math.max(2,Math.floor(plotW/70))).tickFormat(share ? pct : d3.format("~s")).tickSizeOuter(0))
+    .attr("transform",`translate(${BR.m.l},${BR.H-BR.m.b})`);
   const sel = state.boroughs;
   const rowG = bG.selectAll("g.bar").data(res.bars,d=>d.name).join(en=>{
-      const g = en.append("g").attr("class","bar").style("cursor","pointer");
-      g.append("text").attr("class","bl").attr("x",14).style("font-size","12px");
-      g.append("text").attr("class","bv").style("font-size","12px").style("font-weight",700);
+      const g = en.append("g").attr("class","bar").attr("tabindex",0).attr("role","button");
       g.append("rect").attr("class","hit").attr("fill","transparent");
+      g.append("text").attr("class","bl").attr("x",4).style("font-size","12px");
+      g.append("text").attr("class","bv").style("font-size","12px").style("font-weight",700);
+      g.append("g").attr("class","segs");
       g.append("rect").attr("class","sel-outline").attr("rx",2).style("display","none");
       return g; });
+  const tipHtml = d=>`<b>${d.name}</b>${fmt(d.total)} permits<br>`+
+      DUR_LABELS.map((l,i)=>`<span class="sw" style="background:${DUR_RAMP[i]};vertical-align:-1px"></span> ${l}: ${fmt(d.segs[i])}${d.total?` (${pct(d.segs[i]/d.total)})`:""}`).join("<br>")+
+      `<span class="hint">${sel.has(d.name)?"Click to remove filter":"Click to filter every view"}</span>`;
   rowG.attr("transform",d=>`translate(0,${by(d.name)})`)
+    .attr("aria-label",d=>`${d.name}: ${fmt(d.total)} permits`).attr("aria-pressed",d=>sel.has(d.name))
     .on("click",(e,d)=>toggle(state.boroughs,d.name))
-    .on("mousemove",(e,d)=>showTip(e,`<b>${d.name}</b>${fmt(d.total)} permits<br>`+
-        DUR_LABELS.map((l,i)=>`<span class="sw" style="background:${DUR_RAMP[i]};vertical-align:-1px"></span> ${l}: ${fmt(d.segs[i])}${d.total?` (${Math.round(100*d.segs[i]/d.total)}%)`:""}`).join("<br>")))
-    .on("mouseleave",hideTip);
+    .on("keydown",onKey((e,d)=>toggle(state.boroughs,d.name)))
+    .on("mousemove focus",(e,d)=>showTip(e,tipHtml(d)))
+    .on("mouseleave blur",hideTip);
   rowG.select(".bl").attr("y",by.bandwidth()/2+4).text(d=>d.name);
-  rowG.select(".hit").attr("x",0).attr("y",-4).attr("width",BR.W).attr("height",by.bandwidth()+8);
+  rowG.select(".hit").attr("x",0).attr("y",-4).attr("width",BR.W-4).attr("height",by.bandwidth()+8);
   rowG.transition().duration(dur).style("opacity",d=> sel.size && !sel.has(d.name) ? 0.35 : 1);
-  rowG.select(".bv").transition().duration(dur).attr("x",d=>BR.m.l+bx(d.total)+6).attr("y",by.bandwidth()/2+4).textTween(function(d){
+  // absolute total is always shown as a label, also in the Share view
+  const barLen = d => share ? (d.total ? plotW : 0) : bx(d.total);
+  rowG.select(".bv").transition().duration(dur).attr("x",d=>BR.m.l+barLen(d)+6).attr("y",by.bandwidth()/2+4).textTween(function(d){
       const a = this._cur||0, b = d.total, i = d3.interpolateRound(a,b); this._cur=b; return t=>fmt(i(t)); });
   rowG.select(".sel-outline").style("display",d=>sel.has(d.name)?null:"none")
     .attr("x",BR.m.l-2).attr("y",-2).attr("height",by.bandwidth()+4)
-    .transition().duration(dur).attr("width",d=>Math.max(4,bx(d.total))+4);
-  // stacked segments
-  const segs = rowG.selectAll("rect.seg").data(d=>{ let x=0; return d.segs.map((v,i)=>{ const o={i,x,v}; x+=v; return o; }); });
-  segs.join("rect").attr("class","seg").attr("fill",d=>DUR_RAMP[d.i]).attr("y",0).attr("height",by.bandwidth())
-    .transition().duration(dur).attr("x",d=>BR.m.l+bx(d.x)).attr("width",d=>bx(d.v));
+    .transition().duration(dur).attr("width",d=>Math.max(4,barLen(d))+4);
+  // stacked segments (+ % labels inside wide-enough segments in Share view)
+  const segData = d=>{ let x=0; return d.segs.map((v,i)=>{ const f = share ? (d.total? v/d.total : 0) : v; const o={i,x,v:f,raw:v,tot:d.total}; x+=f; return o; }); };
+  const segG = rowG.select("g.segs").selectAll("g.sg").data(segData).join(en=>{
+      const g = en.append("g").attr("class","sg"); g.append("rect").attr("class","seg"); g.append("text").attr("text-anchor","middle").style("font-size","10.5px"); return g; });
+  segG.select("rect").attr("fill",d=>DUR_RAMP[d.i]).attr("y",0).attr("height",by.bandwidth())
+    .transition().duration(dur).attr("x",d=>BR.m.l+bx(d.x)).attr("width",d=>Math.max(0,bx(d.v)));
+  segG.select("text").style("fill",d=>d.i>=2?"#fff":"#1c2230").attr("y",by.bandwidth()/2+4)
+    .text(d=> share && d.tot && bx(d.v)>=30 ? pct(d.raw/d.tot) : "")
+    .transition().duration(dur).attr("x",d=>BR.m.l+bx(d.x)+bx(d.v)/2);
+  d3.selectAll(".segbtn button").attr("aria-pressed",function(){ return this.dataset.mode===state.barMode; });
 }
 
 // ---------- 3. timeline: permits per month, one line per category, brush = date filter
-const TL = { W:1100, H:270, m:{l:48,r:110,t:42,b:30} };
-let tx, ty, tG, brush, brushG, tLine, tCursor;
+let tx, ty, tG, brush, brushG, tLine, tCursor, tLast = null;
 function initTimeline(){
   const svg = d3.select("#timeline");
-  svg.append("text").attr("class","vt").attr("x",14).attr("y",20).text("Permits per month by category");
-  svg.append("text").attr("class","mut").attr("x",14).attr("y",35).style("font-size","11px").text("Drag across the chart to filter every view to those dates. Click empty space to clear.");
   tG = svg.append("g");
-  tx = d3.scaleTime().domain([D.m0, d3.timeMonth.offset(D.m0, D.nM-1)]).range([TL.m.l,TL.W-TL.m.r]);
+  // each month is an interval [start, next start); its point is drawn at the middle of the month
+  tx = d3.scaleTime().domain([D.m0, monthStart(D.nM)]).range([TL.m.l,TL.W-TL.m.r]);
   ty = d3.scaleLinear().range([TL.H-TL.m.b,TL.m.t]);
   tG.append("g").attr("class","grid").attr("transform",`translate(${TL.m.l},0)`);
   tG.append("g").attr("class","axis ax-x").attr("transform",`translate(0,${TL.H-TL.m.b})`);
   tG.append("g").attr("class","axis ax-y").attr("transform",`translate(${TL.m.l},0)`);
   tG.append("g").attr("class","lines").style("pointer-events","none");
   tG.append("g").attr("class","tlabels").style("pointer-events","none");
-  tCursor = tG.append("line").attr("y1",TL.m.t).attr("y2",TL.H-TL.m.b).attr("stroke","#8a93a6").attr("stroke-dasharray","3 3").style("display","none").style("pointer-events","none");
+  tCursor = tG.append("rect").attr("y",TL.m.t).attr("height",TL.H-TL.m.b-TL.m.t).attr("fill","#2a3a8c").attr("fill-opacity",.07).style("display","none").style("pointer-events","none");
   brush = d3.brushX().extent([[TL.m.l,TL.m.t],[TL.W-TL.m.r,TL.H-TL.m.b]])
     .on("brush end",(ev)=>{
       if(ev.sourceEvent==null) return;                       // ignore programmatic moves
       state.dragging = ev.type==="brush";
-      state.range = ev.selection ? ev.selection.map(tx.invert) : null;
+      if(!ev.selection){ state.range = null; render(); return; }
+      let [a,b] = ev.selection.map(tx.invert);
+      if(ev.type==="end"){                                    // snap to whole months on release
+        a = d3.timeMonth.round(a); b = d3.timeMonth.round(b);
+        if(+b<=+a) b = d3.timeMonth.offset(a,1);
+      }
+      state.range = [a,b];
       render();
     });
   brushG = tG.append("g").attr("class","brush").call(brush);
   brushG.select(".selection").attr("fill","#2a3a8c").attr("fill-opacity",.14).attr("stroke","#2a3a8c");
   brushG.on("mousemove.tip",function(ev){
-    const [px] = d3.pointer(ev,this);
-    const mi = Math.max(0,Math.min(D.nM-1, Math.round((tx.invert(px).getFullYear()-D.m0.getFullYear())*12 + tx.invert(px).getMonth()-D.m0.getMonth() + (tx.invert(px).getDate()>15?1:0))));
-    const cx = tx(d3.timeMonth.offset(D.m0,mi));
-    tCursor.style("display",null).attr("x1",cx).attr("x2",cx);
+    const [px] = d3.pointer(ev,this), d = tx.invert(px);
+    const mi = Math.max(0,Math.min(D.nM-1,(d.getFullYear()-D.m0.getFullYear())*12 + d.getMonth()-D.m0.getMonth()));
+    tCursor.style("display",null).attr("x",tx(monthStart(mi))).attr("width",tx(monthStart(mi+1))-tx(monthStart(mi)));
     const res = tLast; if(!res) return;
-    showTip(ev,`<b>${monthFmt(d3.timeMonth.offset(D.m0,mi))}</b>`+D.catNames.map((n,i)=>
-      `<span class="dot" style="background:${D.catColors[i]};width:9px;height:9px"></span> ${n}: ${fmt(res.tl[i*D.nM+mi])}`).join("<br>"));
+    const vals = D.catNames.map((n,i)=>res.tl[i*D.nM+mi]);
+    showTip(ev,`<b>${monthFmt(monthStart(mi))}: ${fmt(d3.sum(vals))} permits</b>`+D.catNames.map((n,i)=>
+      `<span class="dot" style="background:${D.catColors[i]};width:9px;height:9px"></span> ${n}: ${fmt(vals[i])}`).join("<br>")+
+      `<span class="hint">Drag to filter by date</span>`);
   }).on("mouseleave.tip",()=>{ tCursor.style("display","none"); hideTip(); });
-  tLine = d3.line().x((d,i)=>tx(d3.timeMonth.offset(D.m0,i))).y(d=>ty(d)).curve(d3.curveLinear);
-  // x axis: yearly ticks
-  tG.select(".ax-x").call(d3.axisBottom(tx).ticks(d3.timeYear.every(D.nM>96?2:1)).tickFormat(d3.timeFormat("%Y")).tickSizeOuter(0));
+  tLine = d3.line().x((d,i)=>tx(monthMid(i))).y(d=>ty(d)).curve(d3.curveMonotoneX);
+  const years = D.nM > 96 ? 2 : 1;
+  tG.select(".ax-x").call(d3.axisBottom(tx).ticks(d3.timeYear.every(years)).tickFormat(d3.timeFormat("%Y")).tickSizeOuter(0));
 }
-let tLast = null;
 function renderTimeline(res, dur){
   tLast = res;
-  const nM = D.nM;
+  const nM = D.nM, cats = state.cats;
   const series = D.catNames.map((name,i)=>({ name, i, v:Array.from(res.tl.subarray(i*nM,(i+1)*nM)) }));
-  const cats = state.cats;
-  ty.domain([0,(d3.max(res.tl)||1)*1.08]).nice();
+  ty.domain([0,(d3.max(res.tl)||1)*1.08]).nice();          // rescale so small series stay readable when filtered
   tG.select(".ax-y").transition().duration(dur).call(d3.axisLeft(ty).ticks(5).tickSizeOuter(0));
   tG.select(".grid").transition().duration(dur).call(d3.axisLeft(ty).ticks(5).tickSize(-(TL.W-TL.m.l-TL.m.r)).tickFormat(""));
-  const p = tG.select(".lines").selectAll("path").data(series,d=>d.name);
-  p.enter().append("path").attr("fill","none").attr("stroke-linejoin","round").attr("stroke-linecap","round")
-    .attr("d",d=>tLine(d.v))
-    .merge(p).attr("stroke",d=>D.catColors[d.i])
-    .transition().duration(dur).attr("d",d=>tLine(d.v))
-    .attr("stroke-width",d=> cats.has(d.name)?3:2)
-    .attr("opacity",d=> cats.size && !cats.has(d.name) ? 0.18 : 1);
+  const g = tG.select(".lines").selectAll("g").data(series,d=>d.name).join(en=>{
+      const g = en.append("g");
+      // pale colours get a dark casing underneath so the line is visible on white
+      g.append("path").attr("class","case").attr("fill","none").attr("stroke",d=>d3.color(D.catColors[d.i]).darker(1.1)).attr("stroke-linejoin","round").attr("d",d=>tLine(d.v));
+      g.append("path").attr("class","ln").attr("fill","none").attr("stroke-linejoin","round").attr("stroke-linecap","round").attr("d",d=>tLine(d.v));
+      return g; });
+  g.transition().duration(dur).attr("opacity",d=> cats.size && !cats.has(d.name) ? 0.15 : 1);
+  g.select(".case").style("display",d=>isLight(D.catColors[d.i])?null:"none").transition().duration(dur)
+    .attr("d",d=>tLine(d.v)).attr("stroke-width",d=> cats.has(d.name)?4.4:3.4);
+  g.select(".ln").attr("stroke",d=>D.catColors[d.i]).transition().duration(dur)
+    .attr("d",d=>tLine(d.v)).attr("stroke-width",d=> cats.has(d.name)?3:2);
   // direct labels at the right end, nudged apart so they never overlap
   const ends = series.map(s=>({ name:s.name, i:s.i, y:ty(s.v[s.v.length-1]) })).sort((a,b)=>a.y-b.y);
   for(let k=1;k<ends.length;k++) if(ends[k].y-ends[k-1].y<13) ends[k].y = ends[k-1].y+13;
-  const floor = TL.H-TL.m.b-4;                       // if labels were pushed below the axis, stack them back upward
+  const floor = TL.H-TL.m.b-4;
   if(ends[ends.length-1].y>floor){ ends[ends.length-1].y = floor; for(let k=ends.length-2;k>=0;k--) ends[k].y = Math.min(ends[k].y, ends[k+1].y-13); }
+  const short = TL.W < 600;
   tG.select(".tlabels").selectAll("text").data(ends,d=>d.name).join("text")
     .attr("x",TL.W-TL.m.r+8).style("font-size","12px").style("font-weight",700).attr("dominant-baseline","middle")
-    .style("fill",d=>D.catColors[d.i]).text(d=>d.name)
+    .style("fill",d=>textColor(D.catColors[d.i])).text(d=>short && d.name.length>12 ? d.name.split(" ")[0] : d.name)
     .transition().duration(dur).attr("y",d=>d.y)
     .style("opacity",d=> cats.size && !cats.has(d.name) ? 0.3 : 1);
 }
 
-// ---------- footer: data provenance + cleaning notes
+// ---------- footer: data provenance, cleaning notes, links
 function renderFoot(){
   const parts = [];
-  if(META && META.raw_rows) parts.push(`Data: NYC Open Data, Film Permits (${META.source}). ${fmt(META.kept_rows)} of ${fmt(META.raw_rows)} rows kept after cleaning`+
+  if(META && META.raw_rows) parts.push(`<b>Data:</b> NYC Open Data, Film Permits (${META.source}), shooting permits ${monthFmt(D.tMin)} – ${monthFmt(D.tMax)}. ${fmt(META.kept_rows)} of ${fmt(META.raw_rows)} rows kept after cleaning`+
       (META.dropped ? " ("+Object.entries(META.dropped).filter(e=>e[1]).map(e=>`${fmt(e[1])} dropped: ${e[0]}`).join("; ")+")" : "")+".");
-  else parts.push("Data: NYC Open Data, Film Permits"+(META&&META.source?` (${META.source})`:"")+".");
-  parts.push(`Medians are approximated at 0.1 h resolution. Streets held is parsed from free text, so it is approximate. Only subcategories with at least ${MIN_SUB_N} permits are drawn as dots.`);
-  if(!D.anyStreets) parts.push('<span class="warn">No street counts found in the data, so dot area is constant.</span>');
-  document.getElementById("foot").innerHTML = parts.join(" ");
+  else parts.push("<b>Data:</b> NYC Open Data, Film Permits"+(META&&META.source?` (${META.source})`:"")+".");
+  parts.push(`<b>Notes:</b> dots show subcategories with at least ${MIN_SUB_N} permits; ${fmt(D.placeholderN)} permits with a placeholder subcategory (e.g. "Not Applicable") and ${fmt(D.smallN)} in smaller subcategories are counted in the bars and timeline but have no dot. `+
+      `Medians are computed at 0.1 h resolution (rounded down). Streets held is parsed from free text, so it is approximate. A dot's colour is the most common category within that subcategory.`+
+      (D.anyStreets ? "" : ' <span class="warn">No street counts found in the data, so dot area is constant.</span>'));
+  parts.push(`<b>Keyboard:</b> Tab to a dot or bar, Enter to filter, Esc to reset. Filters are saved in the URL, so you can share a view. · `+
+      `<a href="${LINKS.live}">Live dashboard</a> · <a href="${LINKS.repo}">Source code (GitHub)</a> · Built with D3.js v7.`);
+  document.getElementById("foot").innerHTML = parts.map(p=>`<p>${p}</p>`).join("");
 }
 
 /* ============================================================
-   5. STATE -> render(): every interaction just edits `state` and calls render()
+   STATE -> render(): every interaction just edits `state` and calls render()
    ============================================================ */
 let queued = false;
-function render(first){
-  if(first){ draw(); return; }
+function render(){
   if(queued) return; queued = true;
   requestAnimationFrame(()=>{ queued = false; draw(); });
 }
-function draw(){
+function draw(forceDur){
   const res = compute();
-  const dur = state.dragging ? 0 : 220;     // no animation while dragging the brush, keeps it smooth
+  const dur = forceDur!==undefined ? forceDur : state.dragging ? 0 : 250;   // no animation while dragging the brush
   renderScatter(res,dur); renderBars(res,dur); renderTimeline(res,dur);
-  renderLegend(); renderChips(); renderSummary(res); renderFoot();
-  // keep the brush rectangle in sync when the range is cleared from a chip or Reset
-  if(!state.range && !state.dragging) brushG.call(brush.move,null);
-  else if(state.range && !state.dragging){ brushG.call(brush.move,state.range.map(tx)); }
+  renderTakeaway(res); renderBarsTakeaway(res); renderLegend(); renderChips(); renderSummary(res); renderFoot();
+  // keep the brush rectangle in sync when the range changes from a chip, Reset, snapping or the URL
+  if(!state.dragging) brushG.call(brush.move, state.range ? state.range.map(tx) : null);
+  if(!state.dragging) writeHash();
+}
+function resetAll(){
+  state.boroughs.clear(); state.cats.clear(); state.subs.clear(); state.range=null; state.dragging=false; render();
 }
 function wireGlobal(){
-  document.getElementById("reset").addEventListener("click",()=>{
-    state.boroughs.clear(); state.cats.clear(); state.subs.clear(); state.range=null; state.dragging=false; render();
+  document.getElementById("reset").addEventListener("click",resetAll);
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape") resetAll(); });
+  d3.selectAll(".segbtn button").on("click",function(){ state.barMode = this.dataset.mode; render(); });
+  lastW = window.innerWidth;
+  window.addEventListener("resize",onResize);
+  // a pasted/bookmarked link or Back/Forward changes the hash: load that view
+  // (writeHash uses replaceState, which does not fire this event, so there is no loop)
+  window.addEventListener("hashchange",()=>{
+    state.boroughs.clear(); state.cats.clear(); state.subs.clear(); state.range = null; state.barMode = "count";
+    readHash(); render();
   });
 }
 </script>
