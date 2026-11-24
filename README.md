@@ -12,7 +12,7 @@ An interactive D3 dashboard with three linked views of the NYC Open Data **Film 
 | # | View | Research question | Encoding |
 |---|---|---|---|
 | 1 | Subcategory scatter | RQ1 footprint: which productions are frequent but short, and which are rare but long and street-heavy? | x = permits (log), y = median shoot duration, area = avg. streets held, hue = category; median guide lines + quadrant captions |
-| 2 | Borough bars | RQ2 geography: how do permits and shoot lengths differ by borough? | length = permits (or % in Share view), lightness = duration bin |
+| 2 | Borough bars | RQ2 geography: how do permits and shoot lengths differ by borough? | length = permits (or % in Share view), lightness = duration bin (pink-to-plum ramp) |
 | 3 | Monthly timeline | RQ3 time: how did volume change, and did every category move the same way? | x = month, y = permits, hue = category; drag to brush a date range |
 
 ## Deliverables in this repo
@@ -22,7 +22,7 @@ An interactive D3 dashboard with three linked views of the NYC Open Data **Film 
 | Usability test report | [`USABILITY_REPORT.md`](USABILITY_REPORT.md) |
 | Reflection (1 page) + channel justification table | [`REFLECTION.md`](REFLECTION.md) |
 | Prototype feedback and response | [`FEEDBACK_LOG.md`](FEEDBACK_LOG.md) |
-| Annotated screenshots | [`screenshots/`](screenshots/) (`01_…`, `02_…`, `03_…`; before/after pairs) |
+| Annotated screenshots | [`screenshots/`](screenshots/) (`01_…`, `02_…`, `03_…`; before/after pairs; `greyscale_check.png`) |
 | Source code | `index.html`, `prep_data.py` |
 
 ## Interactions
