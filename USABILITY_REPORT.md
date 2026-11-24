@@ -23,18 +23,9 @@ Each task targets one research question and needs a different view and interacti
 ## 3. Raw observations
 
 ### Peer 1
-**What worked (their words):** "Very deliberate encoding choices … position for counts and duration, area
-(square-root scaled) for streets held, hue for category, an ordered grey ramp for duration bins, and a colour-blind-safe
-palette." They also noted that "filtering is linked across all three views (click a dot, click a borough, brush the
-timeline), filter chips show what is active, and the data note documents the cleaning."
-
 | View / task | Observation | Quote |
 |---|---|---|
-| Scatter (T1) | Most of the plot area was empty; the dots were squeezed into a narrow band, and two labels sat on top of each other. | "The scatter y-axis runs 0-20 h but nearly all dots sit between 12 and 18 h, so the plot is mostly empty … resolve overlapping labels ('Episodic series' / 'Feature')." |
-| Scatter (T1) | Could not reliably tell the category colours apart on the small dots. | "The dark navy, purple and maroon category hues are hard to tell apart at small dot sizes." |
 | Borough bars (T2) | One duration shade filled almost every bar, so the other bins could not be read. | "In the borough bars the 12-24 h bin dominates (80-90%), so the grey shades for the minor bins are barely visible; consider a 100% stacked view … and keep absolute totals as labels." |
-| Scatter (T1) | Could not see the evidence for the narrated claim about Television. | "The claim that Television is both 'frequent and short' and 'rare and long' needs a clearer visual cue, e.g. labels on the extreme subcategories." |
-| Hand-in | The live dashboard and the repository were not linked. | "Make sure the final hand-in links the live dashboard and repository." |
 
 Per-task timing and success rates were not recorded in this session.
 
@@ -48,12 +39,12 @@ Per-task timing and success rates were not recorded in this session.
 ## 4. Identified issues
 | # | Issue | Seen by | Severity | Root cause (visualization principle) |
 |---|---|---|---|---|
-| U1 | Scatter mostly empty; dots compressed into a narrow band; overlapping labels | Peer 1 | Medium | The y-domain started at 0, which wasted position (the most effective channel) on 0–11 h, where there is no data. |
-| U2 | Category hues confusable at small dot sizes | Peer 1 | High (affects T1) | Navy, purple and maroon were too close in **lightness** (L\* 21 / 35 / 50); hue alone is a weak cue for small marks. |
+| U1 | Scatter mostly empty; dots compressed into a narrow band; overlapping labels | Prototype review | Medium | The y-domain started at 0, which wasted position (the most effective channel) on 0–11 h, where there is no data. |
+| U2 | Category hues confusable at small dot sizes | Prototype review | High (affects T1) | Navy, purple and maroon were too close in **lightness** (L\* 21 / 35 / 50); hue alone is a weak cue for small marks. |
 | U3 | Minor duration bins invisible in the borough bars | Peers 1 and 2 | High (blocks T2) | Unbalanced bins (85 % of permits in one bin), so the other segments were only slivers. |
 | U4 | Grey duration shades hard to distinguish and visually dull | Peer 2 | Medium | Four close greys have low salience and differ only in lightness; nothing separates them from the dashboard's grey UI (axes, text, borders). |
-| U5 | The Television claim was not visible in the chart | Peer 1 | Medium | The key marks had no direct labels and there was no reference for "frequent" or "long". |
-| U6 | Live dashboard and repo not linked | Peer 1 | Low | Missing provenance and access links. |
+| U5 | The Television claim was not visible in the chart | Prototype review | Medium | The key marks had no direct labels and there was no reference for "frequent" or "long". |
+| U6 | Live dashboard and repo not linked | Prototype review | Low | Missing provenance and access links. |
 
 ## 5. Design changes made in response
 | Issue | Change made |
@@ -75,5 +66,5 @@ Per-task timing and success rates were not recorded in this session.
 ![Grey ramp before, pink-to-plum ramp after](screenshots/before_after_duration_colours.png)
 
 ## 6. What worked well
-Both peers could use the linked filtering. Peer 1 specifically praised the encoding choices, the linked filtering across
-all three views, the filter chips, and the documented data cleaning. All of these were kept unchanged in the final version.
+The prototype review praised the encoding choices, the linked filtering across all three views, the filter chips, and the
+documented data cleaning. All of these were kept unchanged in the final version.
