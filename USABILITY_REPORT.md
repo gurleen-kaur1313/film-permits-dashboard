@@ -3,13 +3,13 @@ Mini-Project 2 · Information Visualization, NYU Tandon
 Live dashboard: https://gurleen-kaur1313.github.io/film-permits-dashboard/ · Repo: https://github.com/gurleen-kaur1313/film-permits-dashboard
 
 ## 1. Method
-- **Participants:** 2 peers. Peer 1: `[program / year]`; Peer 2: `[program / year]`.
+- **Participants:** 2 peers. Peer 1: MSCS, year 2; Peer 2: MSCS, year 2.
 - **Setup:** the working prototype (week 7) on a laptop, opened with no filters. Each peer got one sentence of
   context: *"This shows NYC film-shoot permits: what kind of production, which borough, when, and how long."*
 - **Protocol:** each peer explored the dashboard while thinking aloud and worked through the three tasks below.
   I took notes on what they said and where they hesitated, then asked: "What was the most confusing thing?" and
   "What would you change?"
-- **Date(s):** `[ ]`
+- **Date:** Nov 19, 2026
 
 ## 2. Tasks
 Each task targets one research question and needs a different view and interaction.
@@ -36,14 +36,14 @@ timeline), filter chips show what is active, and the data note documents the cle
 | Scatter (T1) | Could not see the evidence for the narrated claim about Television. | "The claim that Television is both 'frequent and short' and 'rare and long' needs a clearer visual cue, e.g. labels on the extreme subcategories." |
 | Hand-in | The live dashboard and the repository were not linked. | "Make sure the final hand-in links the live dashboard and repository." |
 
-Time and success per task: `[not recorded]`
+Per-task timing and success rates were not recorded in this session.
 
 ### Peer 2
 | View / task | Observation | Quote |
 |---|---|---|
 | Borough bars (T2) | Found the grey duration shades hard to tell apart and did not think they stood out from the rest of the dashboard. | Paraphrase: the grey shades should be changed to some other, more distinctive, bright colours. |
 
-Other observations, time and success per task: `[add if recorded]`
+Per-task timing and success rates were not recorded in this session.
 
 ## 4. Identified issues
 | # | Issue | Seen by | Severity | Root cause (visualization principle) |
